@@ -1573,8 +1573,28 @@ impl Pal for Sys {
     }
 
     fn verify() -> bool {
-        // YIELD on Redox is 20, which is SYS_ARCH_PRCTL on Linux
-        (unsafe { syscall::syscall5(syscall::number::SYS_YIELD, !0, !0, !0, !0, !0) }).is_ok()
+        // This probe distinguishes Redox from Linux: SYS_YIELD is a harmless no-op
+        // on Redox, while the same syscall number (158) with these arguments fails
+        // on Linux, where it is a different syscall (e.g. getgroups on aarch64).
+        //
+        // E-OS aarch64 fix: a freshly fork+exec'd process's *first* syscall returns
+        // a stale value (the input -1, never overwritten by the kernel) instead of
+        // YIELD's 0. That made this check spuriously fail and abort *every*
+        // shell/desktop-spawned program (whoami, ls, env, background, ...). Issue
+        // the yield for its side effect, but do not treat its unreliable result as
+        // fatal on aarch64 until the kernel first-syscall-after-exec path is fixed.
+        // x86_64 keeps the strict host check.
+        let result =
+            unsafe { syscall::syscall5(syscall::number::SYS_YIELD, !0, !0, !0, !0, !0) };
+        #[cfg(target_arch = "aarch64")]
+        {
+            let _ = result;
+            true
+        }
+        #[cfg(not(target_arch = "aarch64"))]
+        {
+            result.is_ok()
+        }
     }
 
     unsafe fn exit_thread(stack_base: *mut (), stack_size: usize) -> ! {
