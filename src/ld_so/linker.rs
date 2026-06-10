@@ -856,7 +856,14 @@ impl Linker {
 
         if let Some(master) = tcb_master {
             if !dlopened {
-                self.tls_size = master.offset; // => aligned ph.p_memsz
+                // x86{_64}: master.offset already includes this module's memsz (backwards
+                // layout). aarch64/riscv64: master.offset is the module's start offset, so
+                // the running total must add the module's size.
+                self.tls_size = if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
+                    master.offset
+                } else {
+                    master.offset + master.segment_size
+                };
             }
 
             tcb_masters.push(master);
