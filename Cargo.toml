@@ -146,6 +146,9 @@ panic = "abort"
 
 [profile.release]
 panic = "abort"
+# E-OS hardening: abort on unintended integer overflow in the C library that
+# underlies every program. Intentional wrapping already uses wrapping_*/Wrapping.
+overflow-checks = true
 
 [patch.crates-io]
 cc-11 = { git = "https://github.com/tea/cc-rs", branch = "riscv-abi-arch-fix", package = "cc" }
