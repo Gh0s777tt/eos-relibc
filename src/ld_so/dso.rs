@@ -711,8 +711,16 @@ impl DSO {
 
         for (i, entry) in entries.iter().enumerate() {
             let val = entry.d_val(NativeEndian);
-            let relative_idx = val as usize - if is_pie { 0 } else { mmap.as_ptr() as usize };
-            let ptr = (val as usize + if is_pie { mmap.as_ptr() as usize } else { 0 }) as *const u8;
+            // E-OS R-402b: d_val is an address only for pointer-tagged entries; size/count
+            // tags (STRSZ, SYMENT, PLTRELSZ, ...) carry plain numbers. Computing these
+            // eagerly for every entry made non-PIE executables (ET_EXEC, e.g. netsurf-fb)
+            // trip the release overflow checks on `small_value - load_base` and abort in
+            // ld.so. Wrapping keeps the arithmetic identical wherever the old code was
+            // already correct; the results are only used for pointer-tagged entries.
+            let relative_idx =
+                (val as usize).wrapping_sub(if is_pie { 0 } else { mmap.as_ptr() as usize });
+            let ptr = (val as usize).wrapping_add(if is_pie { mmap.as_ptr() as usize } else { 0 })
+                as *const u8;
             let tag = entry.d_tag(NativeEndian) as u32;
 
             match tag {
@@ -1099,10 +1107,29 @@ impl DSO {
                     let resolved = resolve_sym(name, &[global_scope, self.scope()])
                         .map(|(sym, _, _)| sym.as_ptr() as usize)
                         .unwrap_or_else(|| {
-                            panic!(
-                                "unresolved symbol: {name} for soname {:?}",
-                                self.dynamic.soname
-                            )
+                            // E-OS R-402b: an unresolved WEAK symbol binds to 0, exactly like
+                            // the .rela.dyn path in static_relocate does per the System V
+                            // gABI; optional hooks such as zstd's ZSTD_trace_* rely on this
+                            // and guard the call on non-NULL. Lazy binding (the x86_64
+                            // default) never even resolves an uncalled slot, which is why
+                            // this only ever aborted on Resolve::Now targets like aarch64.
+                            // Only a strong symbol left unresolved is a fatal error.
+                            let weak = self
+                                .dynamic
+                                .symbol(reloc.sym)
+                                .is_some_and(|sym| sym.st_bind() == elf::STB_WEAK);
+                            if weak {
+                                log::trace!(
+                                    "[ld.so]: unresolved weak symbol {name} -> 0 (soname {:?})",
+                                    self.dynamic.soname
+                                );
+                                0
+                            } else {
+                                panic!(
+                                    "unresolved symbol: {name} for soname {:?}",
+                                    self.dynamic.soname
+                                )
+                            }
                         });
 
                     unsafe {
