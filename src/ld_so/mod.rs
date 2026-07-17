@@ -114,12 +114,12 @@ fn static_init(
                 // x86{_64}: backwards layout, offset measured down from the block end.
                 // aarch64/riscv64: forward layout, the (only) module starts at offset 0 —
                 // matching the compiler's local-exec accesses at TP+16 (TP+0 on riscv64).
-                STATIC_TCB_MASTER.offset =
-                    if cfg!(any(target_arch = "x86", target_arch = "x86_64")) {
-                        valign
-                    } else {
-                        0
-                    };
+                STATIC_TCB_MASTER.offset = if cfg!(any(target_arch = "x86", target_arch = "x86_64"))
+                {
+                    valign
+                } else {
+                    0
+                };
 
                 let tcb = Tcb::new(vsize).expect("failed to allocate TCB");
                 tcb.masters_ptr = ptr::addr_of_mut!(STATIC_TCB_MASTER);
